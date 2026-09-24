@@ -58,3 +58,13 @@ class WorkoutRepository:
         return await self.collection.count_documents(
             {"user_id": user_id, "is_completed": True}
         )
+
+    async def delete(self, plan_id: str, user_id: str) -> bool:
+        """Delete a workout plan belonging to a user."""
+        try:
+            result = await self.collection.delete_one(
+                {"_id": ObjectId(plan_id), "user_id": user_id}
+            )
+            return result.deleted_count > 0
+        except Exception:
+            return False

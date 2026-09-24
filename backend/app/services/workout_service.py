@@ -239,4 +239,9 @@ class WorkoutService:
             "exercises": plan.get("exercises", []),
             "is_completed": plan.get("is_completed", False),
             "created_at": plan.get("created_at"),
+            "ai_generated": plan.get("ai_generated", False),
         }
+
+    async def delete_workout(self, plan_id: str, user_id: str) -> bool:
+        """Delete a workout plan."""
+        return await self.workout_repo.delete(plan_id, user_id)

@@ -5,19 +5,41 @@
 
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
 export const getApiBaseUrl = (): string => {
+  // 1. Explicit environment variable override from mobile/.env
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
-  if (Platform.OS === 'android') {
-    return 'http://10.0.2.2:8000/api/v1';
+
+  // 2. Dynamic host detection from Expo Metro bundler (Works for Expo Go on physical phones)
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants as any).manifest2?.extra?.expoGo?.debuggerHost ||
+    (Constants as any).manifest?.debuggerHost;
+
+  if (hostUri) {
+    const host = hostUri.split(':')[0];
+    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      return `http://${host}:8000/api/v1`;
+    }
   }
-  // Web or iOS simulator
+
+  // 3. Web running in browser
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.hostname) {
+    return `http://${window.location.hostname}:8000/api/v1`;
+  }
+
+  // 4. Default fallback: use current local network IP for physical devices or 10.0.2.2 for emulator
+  if (Platform.OS === 'android') {
+    // If running in standalone or without hostUri, default to local machine IP
+    return 'http://10.115.22.186:8000/api/v1';
+  }
+
+  // 5. iOS Simulator or default
   return 'http://localhost:8000/api/v1';
 };
-
-const API_BASE_URL = getApiBaseUrl();
 
 interface RequestOptions {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -26,10 +48,14 @@ interface RequestOptions {
 }
 
 class ApiService {
-  private baseUrl: string;
+  private explicitBaseUrl?: string;
 
-  constructor(baseUrl: string) {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl?: string) {
+    this.explicitBaseUrl = baseUrl;
+  }
+
+  public getBaseUrl(): string {
+    return this.explicitBaseUrl || getApiBaseUrl();
   }
 
   private async getAuthHeaders(): Promise<Record<string, string>> {
@@ -44,24 +70,30 @@ class ApiService {
   }
 
   private async request<T>(endpoint: string, options: RequestOptions): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+    const baseUrl = this.getBaseUrl();
+    const url = `${baseUrl}${endpoint}`;
     const headers = {
       ...(await this.getAuthHeaders()),
       ...options.headers,
     };
 
-    const response = await fetch(url, {
-      method: options.method,
-      headers,
-      body: options.body,
-    });
+    try {
+      const response = await fetch(url, {
+        method: options.method,
+        headers,
+        body: options.body,
+      });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Network error' }));
-      throw new Error(error.detail || `HTTP ${response.status}`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: `HTTP error ${response.status}` }));
+        throw new Error(error.detail || `HTTP ${response.status}`);
+      }
+
+      return response.json();
+    } catch (err: any) {
+      console.warn(`[API] Request failed: ${options.method} ${url}`, err?.message || err);
+      throw err;
     }
-
-    return response.json();
   }
 
   async get<T>(endpoint: string): Promise<T> {
@@ -87,5 +119,5 @@ class ApiService {
   }
 }
 
-export const api = new ApiService(API_BASE_URL);
+export const api = new ApiService();
 export default api;

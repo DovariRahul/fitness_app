@@ -19,6 +19,7 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="workout-session" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="workout" />
       </Stack>
     </AuthProvider>
   );

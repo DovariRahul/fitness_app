@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,92 +7,42 @@ import {
   TouchableOpacity,
   RefreshControl,
   Image,
-  Dimensions,
-  ActivityIndicator,
-  Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import workoutService from '../../services/workoutService';
-import progressService from '../../services/progressService';
 import Colors from '../../constants/colors';
-import {
-  SearchIcon,
-  BellIcon,
-  MoreHorizontalIcon,
-  FlameIcon,
-} from '../../components/Icons';
+import { SearchIcon, BellIcon } from '../../components/Icons';
 import { WorkoutPlan } from '../../types';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-const CATEGORIES = ['All', 'Strength Training', 'Cardio', 'Flexibility', 'HIIT'];
-
-const SAMPLE_TRENDING = [
-  {
-    id: 'trending-1',
-    category: 'CARDIO',
-    title: 'Beginner HIIT Workout',
-    duration: '10 min',
-    sets: '2 Sets',
-    rest: '30 sec rest between sets',
-    exercisesCount: 5,
-    calories: 500,
-    image:
-      'https://images.unsplash.com/photo-1518611012118-696072aa579a?w=800&auto=format&fit=crop&q=80',
-    instructor: {
-      name: 'Kaiya Press',
-      title: 'Fitness Instructor with 3y+ experience',
-      avatar:
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-    },
-    description:
-      'High-intensity interval training (HIIT) is a type of cardio that alternates short bursts of intense activity with periods of rest or low-intensity activity. The intense activity, or "work" period, is designed to elevate your heart rate rapidly.',
-    exercises: [
-      { name: 'Squat Jump', sets: 2, reps: '12 reps', duration: '45 sec' },
-      { name: 'Mountain Climbers', sets: 2, reps: '20 reps', duration: '45 sec' },
-      { name: 'Burpees', sets: 2, reps: '10 reps', duration: '45 sec' },
-      { name: 'High Knees', sets: 2, reps: '30 reps', duration: '45 sec' },
-      { name: 'Plank Jacks', sets: 2, reps: '15 reps', duration: '45 sec' },
-    ],
-  },
-  {
-    id: 'trending-2',
-    category: 'STRENGTH TRAINING',
-    title: 'Beginner Hand Exercise',
-    duration: '10 min',
-    sets: '2 Sets',
-    rest: '45 sec rest between sets',
-    exercisesCount: 5,
-    calories: 171,
-    image:
-      'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=800&auto=format&fit=crop&q=80',
-    instructor: {
-      name: 'Marcus Brody',
-      title: 'Senior Strength & Conditioning Coach',
-      avatar:
-        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-    },
-    description:
-      'Targeted forearm, grip, and upper arm mobility drills created for building functional joint health and wrist endurance.',
-    exercises: [
-      { name: 'Wrist Curls', sets: 2, reps: '15 reps', duration: '40 sec' },
-      { name: 'Dumbbell Hammer Curls', sets: 2, reps: '12 reps', duration: '45 sec' },
-      { name: 'Plate Pinch Hold', sets: 2, reps: '30 sec', duration: '30 sec' },
-    ],
-  },
-];
+import {
+  EXERCISE_CATEGORIES,
+  ALL_EXERCISES,
+  QUICK_10_MIN_WORKOUT,
+  ExerciseItem,
+} from '../../constants/exercisesData';
+import ExerciseDetailModal from '../../components/ExerciseDetailModal';
 
 export default function HomeScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
 
-  const [activeCategory, setActiveCategory] = useState('All');
+  // Responsive breakpoints
+  const isMobile = width < 768;
+  const isSmallPhone = width < 375;
+  const isTablet = width >= 768 && width < 1024;
+  const isDesktop = width >= 1024;
+
+  const numColumns = isDesktop ? 4 : isTablet ? 3 : 2;
+
+  const [activeCategory, setActiveCategory] = useState<string>('popular');
   const [todayPlan, setTodayPlan] = useState<WorkoutPlan | null>(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedExercise, setSelectedExercise] = useState<ExerciseItem | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -102,8 +52,6 @@ export default function HomeScreen() {
       }
     } catch (e) {
       console.log('Error loading home data:', e);
-    } finally {
-      setLoading(false);
     }
   }, []);
 
@@ -122,20 +70,64 @@ export default function HomeScreen() {
     user?.avatar_url ||
     'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
 
-  const filteredTrending =
-    activeCategory === 'All'
-      ? SAMPLE_TRENDING
-      : SAMPLE_TRENDING.filter((item) =>
-          item.category.toLowerCase().includes(activeCategory.toLowerCase())
-        );
+  // Filter exercises based on selected category
+  const filteredExercises = useMemo(() => {
+    if (activeCategory === 'popular') {
+      return ALL_EXERCISES.filter((ex) => ex.isPopular);
+    }
+    if (activeCategory === 'no_equipment') {
+      return ALL_EXERCISES.filter((ex) => ex.isNoEquipment);
+    }
+    return ALL_EXERCISES.filter((ex) => ex.category === activeCategory);
+  }, [activeCategory]);
+
+  const handleOpenExercise = (ex: ExerciseItem) => {
+    setSelectedExercise(ex);
+    setModalVisible(true);
+  };
+
+  const handleStartWorkout = () => {
+    const planId = todayPlan?.id || 'demo-active-1';
+    router.push({
+      pathname: '/workout/[id]',
+      params: { id: planId },
+    });
+  };
+
+  const handleStartQuickWorkout = () => {
+    router.push({
+      pathname: '/workout-session',
+      params: {
+        plan_id: 'quick-10-min',
+        custom_title: QUICK_10_MIN_WORKOUT.title,
+      },
+    });
+  };
+
+  const getDifficultyColor = (diff: string) => {
+    switch (diff) {
+      case 'Beginner':
+        return '#10B981';
+      case 'Intermediate':
+        return '#F59E0B';
+      case 'Advanced':
+        return '#EF4444';
+      default:
+        return Colors.primary;
+    }
+  };
 
   return (
     <View style={styles.screenContainer}>
       <ScrollView
-        style={styles.container}
+        style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + 16, paddingBottom: 110 },
+          {
+            paddingTop: insets.top + (isMobile ? 12 : 20),
+            paddingBottom: 130, // Space for floating bottom tab bar
+            paddingHorizontal: isMobile ? (isSmallPhone ? 12 : 16) : 24,
+          },
         ]}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -146,174 +138,271 @@ export default function HomeScreen() {
           />
         }
       >
-        {/* Header matching screenshot */}
-        <View style={styles.headerRow}>
-          <View style={styles.userInfoWrapper}>
-            <Image source={{ uri: displayAvatar }} style={styles.avatar} />
-            <View style={styles.userTextWrapper}>
-              <Text style={styles.greetingText}>Good Morning 👋</Text>
-              <Text style={styles.userNameText}>{displayName}</Text>
-            </View>
-          </View>
-
-          <View style={styles.headerIconsRow}>
-            <TouchableOpacity style={styles.iconCircleBtn} activeOpacity={0.7}>
-              <SearchIcon size={18} color="#111216" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconCircleBtn} activeOpacity={0.7}>
-              <BellIcon size={18} color="#111216" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Section: My Active Plans */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>My Active Plans</Text>
-          <TouchableOpacity style={styles.moreBtn} activeOpacity={0.6}>
-            <MoreHorizontalIcon size={18} color="#8E8E93" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Active Plan Dark Card */}
-        <TouchableOpacity
-          activeOpacity={0.92}
-          style={styles.activePlanCard}
-          onPress={() => {
-            const planId = todayPlan?.id || 'demo-active-1';
-            router.push({
-              pathname: '/workout/[id]',
-              params: { id: planId },
-            });
-          }}
-        >
-          <View style={styles.activePlanContent}>
-            {/* Exercise Thumbnail */}
-            <Image
-              source={{
-                uri: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=400&auto=format&fit=crop&q=80',
-              }}
-              style={styles.planThumbnail}
-            />
-
-            {/* Plan Info */}
-            <View style={styles.planInfo}>
-              <Text style={styles.categoryTag}>
-                {todayPlan?.title?.toLowerCase().includes('cardio')
-                  ? 'CARDIO'
-                  : 'STRENGTH TRAINING'}
-              </Text>
-              <Text style={styles.planTitle} numberOfLines={1}>
-                {todayPlan?.title || 'Beginner Hand Exercise'}
-              </Text>
-              <Text style={styles.planMeta}>
-                {todayPlan?.exercises?.length || 5} exercises • 2 sets •{' '}
-                {todayPlan?.estimated_duration_min || 10} min
-              </Text>
-            </View>
-          </View>
-
-          {/* Metrics Row inside dark card */}
-          <View style={styles.metricsRow}>
-            <View style={styles.metricBox}>
-              <Text style={styles.metricLabel}>Burned calories</Text>
-              <Text style={styles.metricValue}>171 kcal</Text>
-            </View>
-
-            <View style={styles.metricBox}>
-              <View style={styles.progressLabelRow}>
-                <Text style={styles.metricLabel}>Progress</Text>
-                <Text style={styles.progressPercent}>68%</Text>
-              </View>
-              <View style={styles.progressBarTrack}>
-                <View style={[styles.progressBarFill, { width: '68%' }]} />
+        <View style={styles.responsiveWrapper}>
+          {/* ── Header ── */}
+          <View style={styles.headerRow}>
+            <View style={styles.userInfoWrapper}>
+              <Image source={{ uri: displayAvatar }} style={styles.avatar} />
+              <View style={styles.userTextWrapper}>
+                <Text style={styles.greetingText}>Good Morning 👋</Text>
+                <Text style={styles.readyText} numberOfLines={1}>
+                  Ready for today's workout, {displayName.split(' ')[0]}?
+                </Text>
               </View>
             </View>
-          </View>
-        </TouchableOpacity>
 
-        {/* Section: Trending Plans */}
-        <View style={[styles.sectionHeaderRow, { marginTop: 28 }]}>
-          <Text style={styles.sectionTitle}>Trending Plans</Text>
-          <TouchableOpacity
-            onPress={() => router.push('/(tabs)/workouts')}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.viewAllText}>View All</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Filter Tabs / Pills */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterPillsRow}
-        >
-          {CATEGORIES.map((cat) => {
-            const isActive = activeCategory === cat;
-            return (
+            <View style={styles.headerIconsRow}>
               <TouchableOpacity
-                key={cat}
-                style={[
-                  styles.filterPill,
-                  isActive && styles.filterPillActive,
-                ]}
-                onPress={() => setActiveCategory(cat)}
+                style={styles.iconCircleBtn}
                 activeOpacity={0.7}
+                onPress={() => router.push('/(tabs)/workouts')}
               >
-                <Text
+                <SearchIcon size={18} color="#111216" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.iconCircleBtn} activeOpacity={0.7}>
+                <BellIcon size={18} color="#111216" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* ── Today's Workout Hero Banner ── */}
+          <TouchableOpacity
+            style={styles.todayCard}
+            activeOpacity={0.92}
+            onPress={handleStartWorkout}
+          >
+            <View style={styles.todayCardBackgroundGlow} />
+
+            <View style={styles.todayCardTop}>
+              <View style={styles.todayBadge}>
+                <Text style={styles.todayBadgeFire}>🔥</Text>
+                <Text style={styles.todayBadgeText}>TODAY'S WORKOUT</Text>
+              </View>
+              <View style={styles.todayMetaBadge}>
+                <Text style={styles.todayMetaBadgeText}>
+                  {todayPlan?.estimated_duration_min || 30} min •{' '}
+                  {todayPlan?.difficulty
+                    ? todayPlan.difficulty.toUpperCase()
+                    : 'BEGINNER'}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.todayTitle} numberOfLines={1}>
+              {todayPlan?.title || 'Full Body Adaptive Power'}
+            </Text>
+
+            <Text style={styles.todaySubtitle} numberOfLines={2}>
+              {todayPlan?.description ||
+                'Personalized session crafted to maximize calorie burn and progressive muscle recruitment.'}
+            </Text>
+
+            <View style={styles.todayDetailsRow}>
+              <View style={styles.todayDetailItem}>
+                <Text style={styles.todayDetailNumber}>
+                  {todayPlan?.exercises?.length || 6}
+                </Text>
+                <Text style={styles.todayDetailLabel}>Exercises</Text>
+              </View>
+
+              <View style={styles.todayDetailDivider} />
+
+              <View style={styles.todayDetailItem}>
+                <Text style={styles.todayDetailNumber}>
+                  {todayPlan?.estimated_duration_min || 30}m
+                </Text>
+                <Text style={styles.todayDetailLabel}>Duration</Text>
+              </View>
+
+              <View style={styles.todayDetailDivider} />
+
+              <View style={styles.todayDetailItem}>
+                <Text style={styles.todayDetailNumber}>🔥 250</Text>
+                <Text style={styles.todayDetailLabel}>Est. kcal</Text>
+              </View>
+            </View>
+
+            {/* Start Button */}
+            <View style={styles.todayStartBtn}>
+              <Text style={styles.todayStartBtnText}>START WORKOUT ▶</Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* ── Explore Exercises Categories ── */}
+          <View style={styles.sectionHeaderRow}>
+            <View>
+              <Text style={styles.sectionTitle}>Explore Exercises</Text>
+              <Text style={styles.sectionSubtitle}>
+                Browse library by target muscle group
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/workouts')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.viewPlansText}>All Plans →</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Filter Pills */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterPillsRow}
+          >
+            {EXERCISE_CATEGORIES.map((cat) => {
+              const isActive = activeCategory === cat.id;
+              return (
+                <TouchableOpacity
+                  key={cat.id}
                   style={[
-                    styles.filterPillText,
-                    isActive && styles.filterPillTextActive,
+                    styles.filterPill,
+                    isActive && styles.filterPillActive,
                   ]}
+                  onPress={() => setActiveCategory(cat.id)}
+                  activeOpacity={0.7}
                 >
-                  {cat}
+                  <Text style={styles.filterPillIcon}>{cat.icon}</Text>
+                  <Text
+                    style={[
+                      styles.filterPillText,
+                      isActive && styles.filterPillTextActive,
+                    ]}
+                  >
+                    {cat.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* ── Exercise Grid Cards (Clean, compact, image + little info) ── */}
+          <View style={styles.gridContainer}>
+            {filteredExercises.map((exercise) => {
+              const itemWidth =
+                numColumns === 2
+                  ? '48.5%'
+                  : numColumns === 3
+                  ? '31.5%'
+                  : '23.5%';
+
+              return (
+                <TouchableOpacity
+                  key={exercise.id}
+                  style={[styles.exerciseCard, { width: itemWidth }]}
+                  activeOpacity={0.88}
+                  onPress={() => handleOpenExercise(exercise)}
+                >
+                  {/* Thumbnail Image */}
+                  <View style={styles.exerciseImageWrap}>
+                    <Image
+                      source={{ uri: exercise.image }}
+                      style={styles.exerciseImage}
+                    />
+                    {/* Difficulty Badge */}
+                    <View
+                      style={[
+                        styles.exerciseDiffBadge,
+                        {
+                          backgroundColor: getDifficultyColor(
+                            exercise.difficulty
+                          ),
+                        },
+                      ]}
+                    >
+                      <Text style={styles.exerciseDiffText}>
+                        {exercise.difficulty}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Little Information on Home Page */}
+                  <View style={styles.exerciseCardBody}>
+                    <Text style={styles.exerciseCardName} numberOfLines={1}>
+                      {exercise.name}
+                    </Text>
+
+                    <Text style={styles.exerciseCardTarget} numberOfLines={1}>
+                      {exercise.target}
+                    </Text>
+
+                    <View style={styles.exerciseCardFooter}>
+                      <Text style={styles.exerciseCardProtocol}>
+                        {exercise.recommended.split('•')[0] || '3 sets'}
+                      </Text>
+
+                      {/* AI Alternative pill */}
+                      <View style={styles.aiAltPill}>
+                        <Text style={styles.aiAltPillText}>💡 AI Alt</Text>
+                      </View>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* ── ⚡ 10-Minute Quick Workout Section ── */}
+          <View style={styles.quickWorkoutSection}>
+            <View style={styles.quickWorkoutCard}>
+              <View style={styles.quickWorkoutHeader}>
+                <View style={styles.quickBadge}>
+                  <Text style={styles.quickBadgeIcon}>⚡</Text>
+                  <Text style={styles.quickBadgeTitle}>10-MINUTE QUICK WORKOUT</Text>
+                </View>
+                <Text style={styles.quickCaloriesBadge}>🔥 110 kcal</Text>
+              </View>
+
+              <Text style={styles.quickWorkoutTitle}>
+                {QUICK_10_MIN_WORKOUT.title}
+              </Text>
+              <Text style={styles.quickWorkoutSubtitle}>
+                {QUICK_10_MIN_WORKOUT.subtitle}
+              </Text>
+
+              {/* 6 Quick Exercise Routine Badges */}
+              <View style={styles.quickExerciseChipsContainer}>
+                {QUICK_10_MIN_WORKOUT.exercises.map((item, idx) => (
+                  <View key={idx} style={styles.quickExerciseChip}>
+                    <Text style={styles.quickChipNum}>{idx + 1}</Text>
+                    <Text style={styles.quickChipName}>{item.name}</Text>
+                    <Text style={styles.quickChipSpec}>{item.spec}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Start Quick Workout Button */}
+              <TouchableOpacity
+                style={styles.quickStartBtn}
+                activeOpacity={0.88}
+                onPress={handleStartQuickWorkout}
+              >
+                <Text style={styles.quickStartBtnText}>
+                  START QUICK WORKOUT ⚡
                 </Text>
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        {/* Trending Workout Cards */}
-        {filteredTrending.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            activeOpacity={0.92}
-            style={styles.trendingCard}
-            onPress={() =>
-              router.push({
-                pathname: '/workout/[id]',
-                params: {
-                  id: item.id,
-                  category: item.category,
-                  title: item.title,
-                },
-              })
-            }
-          >
-            {/* Card Hero Image */}
-            <View style={styles.cardImageWrapper}>
-              <Image source={{ uri: item.image }} style={styles.trendingImage} />
             </View>
-
-            {/* Card Details */}
-            <View style={styles.trendingDetails}>
-              <View style={styles.trendingTextCol}>
-                <Text style={styles.trendingCategory}>{item.category}</Text>
-                <Text style={styles.trendingTitle}>{item.title}</Text>
-                <Text style={styles.trendingMeta}>
-                  {item.exercisesCount} moves • {item.sets} • {item.duration}
-                </Text>
-              </View>
-
-              {/* Instructor Avatar Thumbnail */}
-              <Image
-                source={{ uri: item.instructor.avatar }}
-                style={styles.instructorAvatar}
-              />
-            </View>
-          </TouchableOpacity>
-        ))}
+          </View>
+        </View>
       </ScrollView>
+
+      {/* ── Exercise Detail Modal (Full Description + AI Alternatives) ── */}
+      <ExerciseDetailModal
+        visible={modalVisible}
+        exercise={selectedExercise}
+        onClose={() => setModalVisible(false)}
+        onSelectExercise={(alt) => setSelectedExercise(alt)}
+        onStartExercise={() => {
+          setModalVisible(false);
+          router.push({
+            pathname: '/workout-session',
+            params: {
+              plan_id: selectedExercise?.id || 'exercise-single',
+              custom_title: selectedExercise?.name,
+            },
+          });
+        }}
+      />
     </View>
   );
 }
@@ -321,51 +410,64 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   screenContainer: {
     flex: 1,
-    backgroundColor: '#F7F8FA',
+    backgroundColor: '#F8F9FA',
   },
-  container: {
+  scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
+    flexGrow: 1,
   },
-  // Header
+  responsiveWrapper: {
+    width: '100%',
+    maxWidth: 900,
+    alignSelf: 'center',
+  },
+
+  // ── Header Row ──
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   userInfoWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#E5E7EB',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
   },
   userTextWrapper: {
-    justifyContent: 'center',
+    flex: 1,
   },
   greetingText: {
     fontSize: 13,
-    color: '#71717A',
-    fontWeight: '500',
+    color: '#6B7280',
+    fontWeight: '600',
     marginBottom: 2,
   },
-  userNameText: {
+  readyText: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#111216',
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
   },
   headerIconsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   iconCircleBtn: {
     width: 40,
@@ -375,132 +477,177 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#EFEFEF',
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 1,
+    elevation: 2,
   },
 
-  // Section Headers
-  sectionHeaderRow: {
+  // ── Today's Workout Card ──
+  todayCard: {
+    backgroundColor: '#16171B',
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 26,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 8,
+    position: 'relative',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  todayCardBackgroundGlow: {
+    position: 'absolute',
+    top: -40,
+    right: -40,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(250,90,71,0.15)',
+  },
+  todayCardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 10,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111216',
-    letterSpacing: -0.3,
-  },
-  moreBtn: {
-    padding: 6,
-  },
-  viewAllText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-
-  // Active Plan Card (Dark Charcoal)
-  activePlanCard: {
-    backgroundColor: '#1C1C1E',
-    borderRadius: 22,
-    padding: 16,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 6,
-  },
-  activePlanContent: {
+  todayBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    marginBottom: 14,
+    gap: 6,
+    backgroundColor: 'rgba(250,90,71,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(250,90,71,0.3)',
   },
-  planThumbnail: {
-    width: 76,
-    height: 76,
-    borderRadius: 16,
-    backgroundColor: '#2A2A2E',
+  todayBadgeFire: {
+    fontSize: 12,
   },
-  planInfo: {
-    flex: 1,
-  },
-  categoryTag: {
+  todayBadgeText: {
     fontSize: 11,
     fontWeight: '800',
     color: Colors.primary,
-    letterSpacing: 0.6,
-    marginBottom: 4,
+    letterSpacing: 0.8,
   },
-  planTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 4,
+  todayMetaBadge: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
-  planMeta: {
-    fontSize: 13,
-    color: '#8E8E93',
-  },
-  metricsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  metricBox: {
-    flex: 1,
-    backgroundColor: '#26262B',
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    justifyContent: 'center',
-  },
-  metricLabel: {
+  todayMetaBadgeText: {
     fontSize: 11,
-    color: '#8E8E93',
-    marginBottom: 3,
-  },
-  metricValue: {
-    fontSize: 14,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: 'rgba(255,255,255,0.7)',
   },
-  progressLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  todayTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.4,
     marginBottom: 6,
   },
-  progressPercent: {
+  todaySubtitle: {
     fontSize: 13,
-    fontWeight: '700',
+    color: '#9CA3AF',
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  todayDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#202127',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  todayDetailItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  todayDetailNumber: {
+    fontSize: 16,
+    fontWeight: '800',
     color: '#FFFFFF',
+    marginBottom: 2,
   },
-  progressBarTrack: {
-    height: 5,
-    backgroundColor: '#38383F',
-    borderRadius: 3,
-    overflow: 'hidden',
+  todayDetailLabel: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '600',
   },
-  progressBarFill: {
-    height: '100%',
+  todayDetailDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  todayStartBtn: {
     backgroundColor: Colors.primary,
-    borderRadius: 3,
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  todayStartBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.6,
   },
 
-  // Filter Pills
+  // ── Explore Section ──
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#111216',
+    letterSpacing: -0.4,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  viewPlansText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary,
+    paddingBottom: 2,
+  },
+
+  // ── Filter Pills ──
   filterPillsRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
     marginBottom: 18,
+    paddingVertical: 4,
   },
   filterPill: {
-    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 20,
     backgroundColor: '#ECEEF2',
@@ -508,71 +655,207 @@ const styles = StyleSheet.create({
   filterPillActive: {
     backgroundColor: Colors.primary,
   },
+  filterPillIcon: {
+    fontSize: 13,
+  },
   filterPillText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
     color: '#4B5563',
   },
   filterPillTextActive: {
     color: '#FFFFFF',
   },
 
-  // Trending Plans
-  trendingCard: {
+  // ── Exercise Grid (Home page shows only little info + image) ──
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 14,
+    marginBottom: 28,
+  },
+  exerciseCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 22,
+    borderRadius: 18,
     overflow: 'hidden',
-    marginBottom: 18,
     borderWidth: 1,
     borderColor: '#ECEEF2',
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
     elevation: 2,
   },
-  cardImageWrapper: {
-    width: '100%',
-    height: 180,
+  exerciseImageWrap: {
+    position: 'relative',
+    height: 115,
     backgroundColor: '#E5E7EB',
   },
-  trendingImage: {
+  exerciseImage: {
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
   },
-  trendingDetails: {
+  exerciseDiffBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  exerciseDiffText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  exerciseCardBody: {
+    padding: 10,
+  },
+  exerciseCardName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111216',
+    letterSpacing: -0.2,
+    marginBottom: 3,
+  },
+  exerciseCardTarget: {
+    fontSize: 11,
+    color: '#6B7280',
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  exerciseCardFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
   },
-  trendingTextCol: {
-    flex: 1,
+  exerciseCardProtocol: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    fontWeight: '600',
   },
-  trendingCategory: {
-    fontSize: 11,
+  aiAltPill: {
+    backgroundColor: 'rgba(250,90,71,0.1)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  aiAltPillText: {
+    fontSize: 9,
     fontWeight: '800',
     color: Colors.primary,
-    letterSpacing: 0.6,
-    marginBottom: 3,
   },
-  trendingTitle: {
-    fontSize: 17,
+
+  // ── ⚡ 10-Minute Quick Workout Section ──
+  quickWorkoutSection: {
+    marginBottom: 10,
+  },
+  quickWorkoutCard: {
+    backgroundColor: '#1E1E24',
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    elevation: 6,
+  },
+  quickWorkoutHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  quickBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.3)',
+  },
+  quickBadgeIcon: {
+    fontSize: 12,
+  },
+  quickBadgeTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#F59E0B',
+    letterSpacing: 0.8,
+  },
+  quickCaloriesBadge: {
+    fontSize: 12,
     fontWeight: '700',
-    color: '#111216',
+    color: '#FFFFFF',
+  },
+  quickWorkoutTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
     marginBottom: 4,
   },
-  trendingMeta: {
+  quickWorkoutSubtitle: {
     fontSize: 13,
-    color: '#71717A',
+    color: '#9CA3AF',
+    marginBottom: 16,
   },
-  instructorAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    backgroundColor: '#E5E7EB',
+  quickExerciseChipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 18,
+  },
+  quickExerciseChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  quickChipNum: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: Colors.primary,
+  },
+  quickChipName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  quickChipSpec: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+  },
+  quickStartBtn: {
+    backgroundColor: '#F59E0B',
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    shadowColor: '#F59E0B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  quickStartBtnText: {
+    color: '#111216',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
 });
