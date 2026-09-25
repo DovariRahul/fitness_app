@@ -240,6 +240,8 @@ class WorkoutService:
             "is_completed": plan.get("is_completed", False),
             "created_at": plan.get("created_at"),
             "ai_generated": plan.get("ai_generated", False),
+            "day": plan.get("day"),
+            "time": plan.get("time"),
         }
 
     async def delete_workout(self, plan_id: str, user_id: str) -> bool:

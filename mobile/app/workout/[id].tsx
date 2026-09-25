@@ -22,6 +22,7 @@ import {
   CheckIcon,
 } from '../../components/Icons';
 import workoutService from '../../services/workoutService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -75,9 +76,35 @@ export default function WorkoutDetailScreen() {
           const res = await workoutService.getWorkoutById(id);
           if (res && res.title) {
             setPlanData(res);
+            return;
           }
         } catch (e) {
-          console.log('Error fetching workout detail:', e);
+          console.log('Error fetching workout detail from API:', e);
+        }
+
+        // Fallback: check locally stored manual workouts
+        try {
+          const stored = await AsyncStorage.getItem('@local_manual_workouts');
+          if (stored) {
+            const list = JSON.parse(stored);
+            const found = list.find((w: any) => w.id === id);
+            if (found) {
+              setPlanData({
+                ...found,
+                exercises: found.exercises?.map((ex: any) => ({
+                  exercise: {
+                    name: ex.exercise_name || ex.name,
+                    category: found.focus || 'FITNESS',
+                  },
+                  sets: ex.sets || 3,
+                  reps: ex.reps || 12,
+                  duration_sec: 45,
+                })),
+              });
+            }
+          }
+        } catch (localErr) {
+          console.log('Error reading local workout details:', localErr);
         } finally {
           setLoading(false);
         }

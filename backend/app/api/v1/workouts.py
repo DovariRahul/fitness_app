@@ -22,6 +22,21 @@ class AIGenerateRequest(BaseModel):
     medical_notes: Optional[str] = None
 
 
+class CreateManualWorkoutRequest(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    difficulty: str = "intermediate"
+    estimated_duration_min: int = 30
+    exercises: Optional[List[dict]] = []
+    goal: Optional[str] = "custom"
+    day: Optional[str] = None
+    time: Optional[str] = None
+
+
+class BatchManualWorkoutRequest(BaseModel):
+    plans: List[CreateManualWorkoutRequest]
+
+
 @router.get("/today")
 async def get_today_workout(
     current_user: dict = Depends(get_current_user),
@@ -142,6 +157,94 @@ async def generate_workout(
         duration_override=data.duration_override if data else None,
         difficulty_override=data.difficulty_override if data else None,
     )
+
+
+@router.post("/manual")
+async def create_manual_workout(
+    data: CreateManualWorkoutRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Create a custom manual workout plan."""
+    service = WorkoutService(db)
+    user_id = str(current_user["_id"])
+
+    formatted_exercises = []
+    for idx, ex in enumerate(data.exercises or []):
+        formatted_exercises.append({
+            "exercise_id": ex.get("exercise_id") or f"manual-{idx}",
+            "exercise_name": ex.get("exercise_name") or ex.get("name", f"Exercise {idx + 1}"),
+            "sets": int(ex.get("sets", 3)),
+            "reps": int(ex.get("reps", 10)) if ex.get("reps") is not None else 10,
+            "duration_sec": int(ex.get("duration_sec", 45)) if ex.get("duration_sec") else None,
+            "rest_time_sec": int(ex.get("rest_time_sec", 60)),
+            "order": idx + 1,
+            "instruction": ex.get("instruction", ""),
+            "target_muscle": ex.get("target_muscle", ""),
+        })
+
+    plan_data = {
+        "user_id": user_id,
+        "date": date.today().isoformat(),
+        "title": data.title.strip() if data.title else "Custom Workout",
+        "description": data.description.strip() if data.description else "Custom manual workout routine",
+        "estimated_duration_min": data.estimated_duration_min,
+        "difficulty": data.difficulty,
+        "exercises": formatted_exercises,
+        "ai_generated": False,
+        "goal": data.goal or "custom",
+        "day": data.day,
+        "time": data.time,
+    }
+
+    saved_plan = await service.workout_repo.create(plan_data)
+    return service._format_plan(saved_plan)
+
+
+@router.post("/manual/batch")
+async def create_manual_workout_batch(
+    data: BatchManualWorkoutRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Create multiple custom manual workout plans (e.g. for several days of the week)."""
+    service = WorkoutService(db)
+    user_id = str(current_user["_id"])
+    created_plans = []
+
+    for plan_req in data.plans:
+        formatted_exercises = []
+        for idx, ex in enumerate(plan_req.exercises or []):
+            formatted_exercises.append({
+                "exercise_id": ex.get("exercise_id") or f"manual-{idx}",
+                "exercise_name": ex.get("exercise_name") or ex.get("name", f"Exercise {idx + 1}"),
+                "sets": int(ex.get("sets", 3)),
+                "reps": int(ex.get("reps", 10)) if ex.get("reps") is not None else 10,
+                "duration_sec": int(ex.get("duration_sec", 45)) if ex.get("duration_sec") else None,
+                "rest_time_sec": int(ex.get("rest_time_sec", 60)),
+                "order": idx + 1,
+                "instruction": ex.get("instruction", ""),
+                "target_muscle": ex.get("target_muscle", ""),
+            })
+
+        plan_data = {
+            "user_id": user_id,
+            "date": date.today().isoformat(),
+            "title": plan_req.title.strip() if plan_req.title else "Custom Workout",
+            "description": plan_req.description.strip() if plan_req.description else "Custom manual workout routine",
+            "estimated_duration_min": plan_req.estimated_duration_min,
+            "difficulty": plan_req.difficulty,
+            "exercises": formatted_exercises,
+            "ai_generated": False,
+            "goal": plan_req.goal or "custom",
+            "day": plan_req.day,
+            "time": plan_req.time,
+        }
+
+        saved = await service.workout_repo.create(plan_data)
+        created_plans.append(service._format_plan(saved))
+
+    return created_plans
 
 
 @router.get("/history")
